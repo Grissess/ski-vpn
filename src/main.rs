@@ -1,6 +1,10 @@
 extern crate ski;
 extern crate tokio;
+extern crate tokio_tun;
+extern crate async_trait;
 extern crate sqlite;
+#[macro_use]
+extern crate clap;
 
 pub mod error;
 pub mod routing;
@@ -11,28 +15,74 @@ use std::net::SocketAddr;
 
 // use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::UdpSocket;
+use tokio_tun::{Tun, TunBuilder};
+
+use async_trait::async_trait;
 
 use ski::coding::{Encodable, Decodable};
+
+use clap::App;
 
 type Shared<T> = Arc<T>;
 
 #[allow(dead_code)]
 fn xf_identity(slice: &[u8]) -> io::Result<Vec<u8>> { Ok(Vec::from(slice)) }
 
+#[async_trait]
+trait Transput: Sync + Send {
+    async fn tx(&self, buffer: &[u8]) -> io::Result<()>;
+    async fn rx(&self, buffer: &mut [u8]) -> io::Result<usize>;
+}
+
+struct BoundUdpSocket {
+    pub addr: SocketAddr,
+    pub sock: UdpSocket,
+}
+
+#[async_trait]
+impl Transput for BoundUdpSocket {
+    async fn tx(&self, buffer: &[u8]) -> io::Result<()> {
+        self.sock.send_to(buffer, &self.addr).await?;
+        Ok(())
+    }
+    async fn rx(&self, buffer: &mut [u8]) -> io::Result<usize> {
+        println!("<BoundUdpSocket as Transput>::recv");
+        loop {
+            let (bytes, peer) = self.sock.recv_from(buffer).await?;
+            if peer == self.addr { return Ok(bytes); }
+        }
+    }
+}
+
+#[async_trait]
+impl Transput for Tun {
+    async fn tx(&self, buffer: &[u8]) -> io::Result<()> {
+        self.send(buffer).await?;
+        Ok(())
+    }
+    async fn rx(&self, buffer: &mut [u8]) -> io::Result<usize> {
+        println!("<Tun as Transput>::recv");
+        self.recv(buffer).await
+    }
+}
+
 async fn transfer<F>(
-    src: Shared<UdpSocket>,
-    dst: Shared<UdpSocket>,
+    src: Shared<dyn Transput>,
+    dst: Shared<dyn Transput>,
     mut xfrm: F,
     bufsize: usize,
+    ident: &'static str
 ) -> io::Result<()> where
     F: FnMut(&[u8]) -> io::Result<Vec<u8>>,
 {
     let mut rx_buffer: Vec<u8> = vec![0u8; bufsize];
 
     loop {
-        let (bytes, peer) = src.recv_from(&mut rx_buffer).await?;
+        println!("{} about to recv", ident);
+        let bytes = src.rx(&mut rx_buffer).await?;
+        println!("{} recv {}", ident, bytes);
         match xfrm(&rx_buffer[..bytes]) {
-            Ok(out) => { dst.send_to(&out, &peer).await?; },
+            Ok(out) => { dst.tx(&out).await?; },
             Err(e) => println!("xfer err: {:?}", e),
         }
     }
@@ -41,14 +91,25 @@ async fn transfer<F>(
 const BYTES: usize = 65536usize;
 
 async fn tokio_main() -> io::Result<()> {
-    let key_urn = std::env::args().nth(1).unwrap();
+    let yaml = load_yaml!("args.yml");
+    let matches = App::from_yaml(yaml).get_matches();
+
+    let key_urn = matches.value_of("key").unwrap();
     let key = ski::sym::Key::decode(
         &ski::coding::CodedObject::from_urn(&key_urn).unwrap()
     ).unwrap();
 
-    let (a, b) = (
-        Shared::new(UdpSocket::bind("127.0.0.1:9001".parse::<SocketAddr>().unwrap()).await?),
-        Shared::new(UdpSocket::bind("127.0.0.1:9002".parse::<SocketAddr>().unwrap()).await?),
+    let (udp, tun) = (
+        UdpSocket::bind(matches.value_of("bind").unwrap_or("0.0.0.0:0").parse::<SocketAddr>().unwrap()).await?,
+        TunBuilder::new()
+            .name(matches.value_of("intf").unwrap_or("ski"))
+            .packet_info(false)
+            .try_build().unwrap(),
+    );
+
+    let (a, b): (Shared<dyn Transput>, Shared<dyn Transput>) = (
+        Shared::new(tun),
+        Shared::new(BoundUdpSocket { sock: udp, addr: matches.value_of("peer").unwrap().parse().unwrap() }),
     );
 
     let encrypt = {
@@ -70,8 +131,12 @@ async fn tokio_main() -> io::Result<()> {
         }
     };
 
-    let a2b = tokio::spawn(transfer(a.clone(), b.clone(), encrypt, BYTES));
-    let b2a = tokio::spawn(transfer(b.clone(), a.clone(), decrypt, BYTES));
+    println!("pre spawn");
+
+    let a2b = tokio::spawn(transfer(a.clone(), b.clone(), encrypt, BYTES, "from_udp"));
+    let b2a = tokio::spawn(transfer(b.clone(), a.clone(), decrypt, BYTES, "from_tun"));
+
+    println!("post spawn");
 
     Ok(tokio::select! {
         _ = a2b => (),

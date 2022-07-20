@@ -8,6 +8,8 @@ edition = "2018"
 
 [dependencies]
 tokio = { version = "^1.0", features = ["full"] }
-tokio-tun = "^0.3"
+tokio-tun = "^0.5"
 sqlite = "^0.24"
+async-trait = "^0.1"
+clap = { version = "^2", features = ["yaml"] }
 ski = { git = "https://gitea.cslabs.clarkson.edu/grissess/ski-rust.git", branch = "master" }

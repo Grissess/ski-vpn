@@ -1,0 +1,23 @@
+name: ski-vpn
+version: "0.1-20220719"
+author: Grissess <grissess@nexusg.org>
+about: Sets up a P2P tunnel using the Ski cryptosystem
+args:
+    - bind:
+        long: bind
+        short: b
+        help: Port:addr to bind (default 0.0.0.0:0)
+        takes_value: true
+    - intf:
+        short: i
+        long: interface
+        help: Interface name to create (default ski)
+        takes_value: true
+    - peer:
+        index: 2
+        help: Port:addr to send to
+        required: true
+    - key:
+        index: 1
+        help: Ski symmetric key URN
+        required: true
