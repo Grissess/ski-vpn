@@ -12,6 +12,7 @@ pub mod routing;
 use std::io;
 use std::sync::Arc;
 use std::net::SocketAddr;
+use tokio::sync::Mutex;
 
 // use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::UdpSocket;
@@ -35,21 +36,27 @@ trait Transput: Sync + Send {
 }
 
 struct BoundUdpSocket {
-    pub addr: SocketAddr,
+    pub addr: Mutex<SocketAddr>,
+    pub update: bool,
     pub sock: UdpSocket,
 }
 
 #[async_trait]
 impl Transput for BoundUdpSocket {
     async fn tx(&self, buffer: &[u8]) -> io::Result<()> {
-        self.sock.send_to(buffer, &self.addr).await?;
+        self.sock.send_to(buffer, &*self.addr.lock().await).await?;
         Ok(())
     }
     async fn rx(&self, buffer: &mut [u8]) -> io::Result<usize> {
         println!("<BoundUdpSocket as Transput>::recv");
         loop {
             let (bytes, peer) = self.sock.recv_from(buffer).await?;
-            if peer == self.addr { return Ok(bytes); }
+            if self.update {
+                *self.addr.lock().await = peer;
+                return Ok(bytes);
+            } else {
+                if peer == *self.addr.lock().await { return Ok(bytes); }
+            }
         }
     }
 }
@@ -109,7 +116,11 @@ async fn tokio_main() -> io::Result<()> {
 
     let (a, b): (Shared<dyn Transput>, Shared<dyn Transput>) = (
         Shared::new(tun),
-        Shared::new(BoundUdpSocket { sock: udp, addr: matches.value_of("peer").unwrap().parse().unwrap() }),
+        Shared::new(BoundUdpSocket {
+            sock: udp,
+            addr: Mutex::new(matches.value_of("peer").unwrap().parse().unwrap()),
+            update: matches.is_present("roam"),
+        }),
     );
 
     let encrypt = {
@@ -131,12 +142,8 @@ async fn tokio_main() -> io::Result<()> {
         }
     };
 
-    println!("pre spawn");
-
     let a2b = tokio::spawn(transfer(a.clone(), b.clone(), encrypt, BYTES, "from_udp"));
     let b2a = tokio::spawn(transfer(b.clone(), a.clone(), decrypt, BYTES, "from_tun"));
-
-    println!("post spawn");
 
     Ok(tokio::select! {
         _ = a2b => (),

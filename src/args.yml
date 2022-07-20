@@ -21,3 +21,7 @@ args:
         index: 1
         help: Ski symmetric key URN
         required: true
+    - roam:
+        short: r
+        long: roam
+        help: Allow updating the peer to wherever we last received a decrypted packet
