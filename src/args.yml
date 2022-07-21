@@ -25,3 +25,13 @@ args:
         short: r
         long: roam
         help: Allow updating the peer to wherever we last received a decrypted packet
+    - assocs:
+        short: n
+        long: assocs
+        help: Number of local associations to process (default 8)
+        takes_value: true
+    - assoc:
+        short: a
+        long: assoc
+        help: Local association number (default 0)
+        takes_value: true

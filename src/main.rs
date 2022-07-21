@@ -13,6 +13,7 @@ use std::io;
 use std::sync::Arc;
 use std::net::SocketAddr;
 use tokio::sync::Mutex;
+use tokio::time::{Duration, self};
 
 // use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::UdpSocket;
@@ -38,24 +39,31 @@ trait Transput: Sync + Send {
 struct BoundUdpSocket {
     pub addr: Mutex<SocketAddr>,
     pub update: bool,
-    pub sock: UdpSocket,
+    pub sock: Shared<UdpSocket>,
 }
 
 #[async_trait]
 impl Transput for BoundUdpSocket {
     async fn tx(&self, buffer: &[u8]) -> io::Result<()> {
-        self.sock.send_to(buffer, &*self.addr.lock().await).await?;
+        if let Err(e) = self.sock.send_to(buffer, &*self.addr.lock().await).await {
+            println!("udp send error: {:?}", e);
+        }
         Ok(())
     }
     async fn rx(&self, buffer: &mut [u8]) -> io::Result<usize> {
-        println!("<BoundUdpSocket as Transput>::recv");
         loop {
-            let (bytes, peer) = self.sock.recv_from(buffer).await?;
-            if self.update {
-                *self.addr.lock().await = peer;
-                return Ok(bytes);
-            } else {
-                if peer == *self.addr.lock().await { return Ok(bytes); }
+            match self.sock.recv_from(buffer).await {
+                Ok((bytes, peer)) => {
+                    if self.update {
+                        *self.addr.lock().await = peer;
+                        return Ok(bytes);
+                    } else {
+                        if peer == *self.addr.lock().await { return Ok(bytes); }
+                    }
+                },
+                Err(e) => {
+                    println!("udp recv error: {:?}", e);
+                }
             }
         }
     }
@@ -68,7 +76,6 @@ impl Transput for Tun {
         Ok(())
     }
     async fn rx(&self, buffer: &mut [u8]) -> io::Result<usize> {
-        println!("<Tun as Transput>::recv");
         self.recv(buffer).await
     }
 }
@@ -85,9 +92,8 @@ async fn transfer<F>(
     let mut rx_buffer: Vec<u8> = vec![0u8; bufsize];
 
     loop {
-        println!("{} about to recv", ident);
         let bytes = src.rx(&mut rx_buffer).await?;
-        println!("{} recv {}", ident, bytes);
+        println!("{}: {:?}", ident, bytes);
         match xfrm(&rx_buffer[..bytes]) {
             Ok(out) => { dst.tx(&out).await?; },
             Err(e) => println!("xfer err: {:?}", e),
@@ -114,10 +120,12 @@ async fn tokio_main() -> io::Result<()> {
             .try_build().unwrap(),
     );
 
+    let udp = Shared::new(udp);
+
     let (a, b): (Shared<dyn Transput>, Shared<dyn Transput>) = (
         Shared::new(tun),
         Shared::new(BoundUdpSocket {
-            sock: udp,
+            sock: udp.clone(),
             addr: Mutex::new(matches.value_of("peer").unwrap().parse().unwrap()),
             update: matches.is_present("roam"),
         }),
