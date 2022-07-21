@@ -72,11 +72,18 @@ impl Transput for BoundUdpSocket {
 #[async_trait]
 impl Transput for Tun {
     async fn tx(&self, buffer: &[u8]) -> io::Result<()> {
-        self.send(buffer).await?;
+        if let Err(e) = self.send(buffer).await {
+            println!("tun send error: {:?}", e);
+        }
         Ok(())
     }
     async fn rx(&self, buffer: &mut [u8]) -> io::Result<usize> {
-        self.recv(buffer).await
+        loop {
+            match self.recv(buffer).await {
+                Ok(sz) => { return Ok(sz); },
+                Err(e) => { println!("tun recv error: {:?}", e); },
+            }
+        }
     }
 }
 
