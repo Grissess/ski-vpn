@@ -123,6 +123,8 @@ async fn tokio_main() -> io::Result<()> {
         UdpSocket::bind(matches.value_of("bind").unwrap_or("0.0.0.0:0").parse::<SocketAddr>().unwrap()).await?,
         TunBuilder::new()
             .name(matches.value_of("intf").unwrap_or("ski"))
+            .mtu(matches.value_of("mtu").unwrap_or("500").parse().unwrap())
+            .tap(matches.is_present("tap"))
             .packet_info(false)
             .try_build().unwrap(),
     );

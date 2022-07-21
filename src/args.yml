@@ -35,3 +35,11 @@ args:
         long: assoc
         help: Local association number (default 0)
         takes_value: true
+    - mtu:
+        short: m
+        long: mtu
+        help: TUN/TAP MTU (default 500--remember, UDP!)
+        takes_value: true
+    - tap:
+        long: tap
+        help: Pass L2 frames (instead of L3 packets)
