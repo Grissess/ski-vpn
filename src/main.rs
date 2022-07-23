@@ -100,6 +100,7 @@ async fn transfer<F>(
 
     loop {
         let bytes = src.rx(&mut rx_buffer).await?;
+        #[cfg(debug_assertions)]
         println!("{}: {:?}", ident, bytes);
         match xfrm(&rx_buffer[..bytes]) {
             Ok(out) => { dst.tx(&out).await?; },
@@ -159,8 +160,8 @@ async fn tokio_main() -> io::Result<()> {
         }
     };
 
-    let a2b = tokio::spawn(transfer(a.clone(), b.clone(), encrypt, BYTES, "from_udp"));
-    let b2a = tokio::spawn(transfer(b.clone(), a.clone(), decrypt, BYTES, "from_tun"));
+    let a2b = tokio::spawn(transfer(a.clone(), b.clone(), encrypt, BYTES, "from_tun"));
+    let b2a = tokio::spawn(transfer(b.clone(), a.clone(), decrypt, BYTES, "from_udp"));
 
     Ok(tokio::select! {
         _ = a2b => (),
