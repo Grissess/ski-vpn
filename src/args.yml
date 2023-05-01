@@ -19,7 +19,7 @@ args:
         required: true
     - key:
         index: 1
-        help: Ski symmetric key URN
+        help: Ski symmetric key URN (if it's not a URN, read that file; if -, read stdin)
         required: true
     - roam:
         short: r

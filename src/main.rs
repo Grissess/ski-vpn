@@ -9,7 +9,7 @@ extern crate clap;
 pub mod error;
 pub mod routing;
 
-use std::io;
+use std::io::{self, Read};
 use std::sync::Arc;
 use std::net::SocketAddr;
 use tokio::sync::Mutex;
@@ -21,7 +21,8 @@ use tokio_tun::{Tun, TunBuilder};
 
 use async_trait::async_trait;
 
-use ski::coding::{Encodable, Decodable};
+use ski::coding::{Encodable, Decodable, CodedObject};
+use ski::sym::Key;
 
 use clap::App;
 
@@ -115,10 +116,22 @@ async fn tokio_main() -> io::Result<()> {
     let yaml = load_yaml!("args.yml");
     let matches = App::from_yaml(yaml).get_matches();
 
-    let key_urn = matches.value_of("key").unwrap();
-    let key = ski::sym::Key::decode(
-        &ski::coding::CodedObject::from_urn(&key_urn).unwrap()
-    ).unwrap();
+    let key = matches.value_of("key").unwrap();
+    let key = {
+        if key == "-" {
+            let mut buffer = String::new();
+            std::io::stdin().read_to_string(&mut buffer).unwrap();
+            Key::decode(&CodedObject::from_urn(buffer.trim()).unwrap())
+        } else {
+            CodedObject::from_urn(&key)
+                .map(|co| Key::decode(&co))
+                .unwrap_or_else(|_| {
+                    let buffer = std::fs::read_to_string(key).unwrap();
+                    Key::decode(&CodedObject::from_urn(buffer.trim()).unwrap())
+                })
+        }
+    }.unwrap();
+    println!("key loaded, starting tunnel");
 
     let (udp, tun) = (
         UdpSocket::bind(matches.value_of("bind").unwrap_or("0.0.0.0:0").parse::<SocketAddr>().unwrap()).await?,
