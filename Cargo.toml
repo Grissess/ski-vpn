@@ -12,4 +12,4 @@ tokio-tun = "^0.5"
 sqlite = "^0.24"
 async-trait = "^0.1"
 clap = { version = "^2", features = ["yaml"] }
-ski = { git = "https://gitea.cslabs.clarkson.edu/grissess/ski-rust.git", branch = "master" }
+ski = { git = "https://github.com/Grissess/ski-rust.git", branch = "master" }
