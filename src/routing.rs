@@ -22,7 +22,7 @@ impl<'l, 's> Iterator for ExecIter<'l, 's> {
             Ok(State::Row) => {
                 let mut vec = vec![Value::Null; self.count];
                 for i in 0..self.count {
-                    vec[i] = match self.stmt.read(i) {
+                    vec[i] = match self.stmt.read::<Value, _>(i) {
                         Err(e) => return Some(Err(error::Error::from(e))),
                         Ok(v) => v,
                     };
@@ -43,9 +43,9 @@ impl<'l, 's> Drop for ExecIter<'l, 's> {
 
 fn execute_with<'l, 's, 'v>(st: &'l mut Statement<'s>, v: &'v [Value]) -> error::Result<ExecIter<'l, 's>> {
     for (idx, v) in v.iter().enumerate() {
-        st.bind(idx + 1, v)?;
+        st.bind((idx + 1, v))?;
     }
-    let count = st.count();
+    let count = st.column_count();
     Ok(ExecIter {
         stmt: st,
         count,
@@ -157,8 +157,8 @@ impl Table {
         for maybe_row in execute_with(self.st_all.as_mut().unwrap(), &[])? {
             let row = maybe_row?;
             let pfx = Prefix::from_addr_mask(
-                Ipv4Addr::from(row[0].as_integer().ok_or(InvalidDataType)? as u32),
-                Ipv4Addr::from(row[1].as_integer().ok_or(InvalidDataType)? as u32),
+                Ipv4Addr::from(row[0].try_into::<i64>().map_err(|_| InvalidDataType)? as u32),
+                Ipv4Addr::from(row[1].try_into::<i64>().map_err(|_| InvalidDataType)? as u32),
             );
             if pfx.matches(to) {
                 return Ok(Entry {
@@ -167,10 +167,10 @@ impl Table {
                         None
                     } else {
                         let mut bytes = [0u8; 32];
-                        bytes.copy_from_slice(row[2].as_binary().ok_or(InvalidDataType)?);
+                        bytes.copy_from_slice(row[2].try_into::<&[u8]>().map_err(|_| InvalidDataType)?);
                         Some(Key { bytes })
                     },
-                    dest: (row[3].as_integer().ok_or(InvalidDataType)? as u32).into(),
+                    dest: (row[3].try_into::<i64>().map_err(|_| InvalidDataType)? as u32).into(),
                 })
             }
         }
